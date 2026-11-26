@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>님 게임 (Nim)</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --ink:#1a1d21; --sub:#6b7280;
+    --line:#e5e7eb; --accent:#2563eb; --accent-soft:#dbeafe;
+    --block:#ffffff; --block-line:#d1d5db;
+    --pick:#2563eb; --pick-soft:#eff6ff;
+    --win:#16a34a; --lose:#dc2626; --shadow:0 6px 24px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0; font-family:Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px; min-height:100dvh;
+  }
+  .app{
+    width:100%; max-width:480px; background:var(--panel);
+    border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow);
+    padding:28px 24px 24px; display:flex; flex-direction:column; gap:20px;
+  }
+  header{text-align:center;}
+  header h1{margin:0; font-size:26px; letter-spacing:-.5px;}
+  header p{margin:6px 0 0; font-size:13px; color:var(--sub); line-height:1.5;}
+
+  .status{
+    text-align:center; font-size:16px; font-weight:600; min-height:24px;
+    padding:10px 14px; border-radius:14px; background:var(--bg);
+    transition:.2s; letter-spacing:-.3px;
+  }
+  .status.me{background:var(--accent-soft); color:var(--accent);}
+  .status.cpu{background:#f3f4f6; color:var(--sub);}
+
+  .board{
+    display:grid; grid-template-columns:repeat(5,1fr); gap:12px;
+    padding:4px 0;
+  }
+  .block{
+    aspect-ratio:1/1; border-radius:16px; background:var(--block);
+    border:2px solid var(--block-line); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    font-size:20px; font-weight:700; color:var(--block-line);
+    transition:transform .12s, background .15s, border-color .15s, opacity .25s;
+    user-select:none;
+  }
+  .block:active{transform:scale(.94);}
+  .block.picked{
+    background:var(--pick-soft); border-color:var(--pick); color:var(--pick);
+    transform:translateY(-4px);
+  }
+  .block.gone{
+    opacity:0; transform:scale(.5); pointer-events:none;
+  }
+  .block.locked{cursor:default; pointer-events:none;}
+
+  .controls{display:flex; flex-direction:column; gap:12px;}
+  .hint{text-align:center; font-size:13px; color:var(--sub); min-height:18px;}
+  .btn{
+    border:none; border-radius:14px; padding:16px; font-size:16px; font-weight:700;
+    cursor:pointer; font-family:inherit; transition:.15s; letter-spacing:-.3px;
+  }
+  .btn-primary{background:var(--accent); color:#fff;}
+  .btn-primary:disabled{background:var(--line); color:#9ca3af; cursor:default;}
+  .btn-primary:not(:disabled):active{transform:scale(.97);}
+  .btn-ghost{background:var(--bg); color:var(--ink); border:1px solid var(--line);}
+
+  /* 오버레이 (선공 선택 / 결과) */
+  .overlay{
+    position:fixed; inset:0; background:rgba(17,20,25,.55);
+    display:none; align-items:center; justify-content:center; padding:24px; z-index:10;
+    backdrop-filter:blur(2px);
+  }
+  .overlay.show{display:flex;}
+  .card{
+    background:#fff; border-radius:24px; padding:32px 26px; width:100%; max-width:360px;
+    text-align:center; box-shadow:var(--shadow); animation:pop .25s ease;
+  }
+  @keyframes pop{from{transform:scale(.85);opacity:0;}to{transform:scale(1);opacity:1;}}
+  .card h2{margin:0 0 8px; font-size:24px;}
+  .card h2.win{color:var(--win);} .card h2.lose{color:var(--lose);}
+  .card p{margin:0 0 22px; font-size:14px; color:var(--sub); line-height:1.5;}
+  .card .choice{display:flex; flex-direction:column; gap:12px;}
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>님 게임</h1>
+      <p>블록 10개에서 번갈아 1개 또는 2개씩 가져가요.<br>마지막 블록을 가져가는 쪽이 <b>승리</b>!</p>
+    </header>
+
+    <div id="status" class="status">게임을 시작합니다</div>
+
+    <div id="board" class="board"></div>
+
+    <div class="controls">
+      <div id="hint" class="hint"></div>
+      <button id="confirm" class="btn btn-primary" disabled>가져가기</button>
+      <button id="restart" class="btn btn-ghost">새 게임</button>
+    </div>
+  </div>
+
+  <!-- 선공 선택 -->
+  <div id="startOverlay" class="overlay">
+    <div class="card">
+      <h2>누가 먼저 할까요?</h2>
+      <p>님 게임은 순서가 승패를 좌우해요.<br>먼저 가져갈 쪽을 골라주세요.</p>
+      <div class="choice">
+        <button class="btn btn-primary" onclick="startGame('me')">내가 먼저</button>
+        <button class="btn btn-ghost" onclick="startGame('cpu')">컴퓨터 먼저</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 결과 -->
+  <div id="endOverlay" class="overlay">
+    <div class="card">
+      <h2 id="endTitle"></h2>
+      <p id="endMsg"></p>
+      <div class="choice">
+        <button class="btn btn-primary" onclick="askStart()">다시 하기</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const TOTAL = 10;
+  let remaining = TOTAL;
+  let picked = [];          // 이번 턴에 선택한 블록 인덱스
+  let turn = 'me';          // 'me' | 'cpu'
+  let busy = false;         // 입력 잠금
+  const boardEl = document.getElementById('board');
+  const statusEl = document.getElementById('status');
+  const hintEl = document.getElementById('hint');
+  const confirmBtn = document.getElementById('confirm');
+
+  // 블록 생성 (상단부터 차례로 제거되는 느낌)
+  function buildBoard(){
+    boardEl.innerHTML = '';
+    for(let i=0;i<TOTAL;i++){
+      const b = document.createElement('div');
+      b.className = 'block';
+      b.dataset.idx = i;
+      b.addEventListener('click', ()=>onBlockClick(i));
+      boardEl.appendChild(b);
+    }
+  }
+
+  // 남아있는 블록들의 DOM (뒤에서부터 가져가도록 = 화면상 마지막 블록들)
+  function liveBlocks(){
+    return [...boardEl.children].filter(b=>!b.classList.contains('gone'));
+  }
+
+  function onBlockClick(idx){
+    if(busy || turn!=='me') return;
+    const b = boardEl.children[idx];
+    if(b.classList.contains('gone') || b.classList.contains('locked')) return;
+
+    const pos = picked.indexOf(idx);
+    if(pos>-1){ // 선택 해제
+      picked.splice(pos,1);
+      b.classList.remove('picked');
+    } else {
+      if(picked.length>=2) return; // 최대 2개
+      picked.push(idx);
+      b.classList.add('picked');
+    }
+    updateControls();
+  }
+
+  function updateControls(){
+    confirmBtn.disabled = picked.length===0;
+    confirmBtn.textContent = picked.length>0 ? `${picked.length}개 가져가기` : '가져가기';
+    hintEl.textContent = turn==='me'
+      ? (picked.length===0 ? '블록을 1~2개 톡톡 눌러 선택하세요' : '선택 완료! 가져가기를 누르세요')
+      : '';
+  }
+
+  confirmBtn.addEventListener('click', ()=>{
+    if(turn!=='me' || picked.length===0) return;
+    takeBlocks(picked.length, 'me');
+  });
+
+  // 블록 실제 제거 (가장 뒤쪽 live 블록부터 제거 → 선택한 개수만큼)
+  function takeBlocks(count, who){
+    busy = true;
+    picked.forEach(i=>boardEl.children[i].classList.remove('picked'));
+    picked = [];
+
+    const live = liveBlocks();
+    const toRemove = live.slice(-count); // 뒤쪽부터
+    toRemove.forEach((b,k)=>{
+      setTimeout(()=>b.classList.add('gone'), k*90);
+    });
+    remaining -= count;
+
+    const delay = count*90 + 350;
+    setTimeout(()=>{
+      if(remaining<=0){ endGame(who); return; }
+      turn = (who==='me') ? 'cpu' : 'me';
+      busy = false;
+      refreshTurn();
+      if(turn==='cpu') setTimeout(cpuMove, 650);
+    }, delay);
+  }
+
+  function refreshTurn(){
+    if(turn==='me'){
+      statusEl.className='status me';
+      statusEl.textContent=`내 차례 · 남은 블록 ${remaining}개`;
+    } else {
+      statusEl.className='status cpu';
+      statusEl.textContent=`컴퓨터가 고민 중… · 남은 블록 ${remaining}개`;
+    }
+    updateControls();
+  }
+
+  // ===== 접대용 AI =====
+  // 완벽 전략: (남은 % 3)개를 가져가면 필승. 단 remaining%3===0 이면 필패 상황 → 아무거나.
+  // 80% 최선 / 20% 랜덤 실수
+  function cpuMove(){
+    let count;
+    const best = remaining % 3;              // 1 or 2 면 이 수가 최선
+    const canWin = (best !== 0);
+    if(canWin && Math.random() < 0.8){
+      count = best;                          // 최선의 수
+    } else {
+      // 실수(또는 필패 상황): 1~2 랜덤, 남은 게 1개면 1
+      count = (remaining===1) ? 1 : (Math.random()<0.5?1:2);
+    }
+    count = Math.min(count, remaining);
+    takeBlocks(count, 'cpu');
+  }
+
+  // ===== 게임 흐름 =====
+  function endGame(lastTaker){
+    busy = true;
+    const won = (lastTaker==='me');
+    const t = document.getElementById('endTitle');
+    const m = document.getElementById('endMsg');
+    t.textContent = won ? '🎉 승리!' : '아쉽네요, 패배';
+    t.className = won ? 'win' : 'lose';
+    m.textContent = won
+      ? '마지막 블록을 가져갔어요. 멋진 승리예요!'
+      : '컴퓨터가 마지막 블록을 가져갔어요. 다시 도전해보세요!';
+    setTimeout(()=>document.getElementById('endOverlay').classList.add('show'), 300);
+  }
+
+  function askStart(){
+    document.getElementById('endOverlay').classList.remove('show');
+    document.getElementById('startOverlay').classList.add('show');
+  }
+
+  function startGame(first){
+    document.getElementById('startOverlay').classList.remove('show');
+    remaining = TOTAL; picked = []; busy=false; turn = first;
+    buildBoard();
+    refreshTurn();
+    if(first==='cpu'){ busy=true; statusEl.textContent='컴퓨터가 먼저 시작해요…'; setTimeout(cpuMove, 800); }
+  }
+
+  document.getElementById('restart').addEventListener('click', askStart);
+
+  // 최초 진입
+  buildBoard();
+  askStart();
+</script>
+</body>
+</html>
